@@ -1,0 +1,11 @@
+# Arduino specific
+*.ino.hex
+*.ino.with_bootloader.hex
+*.ino.with_bootloader.bin
+*.elf
+*.hex
+*.bin
+*.map
+.vscode/
+.pio/
+build/
