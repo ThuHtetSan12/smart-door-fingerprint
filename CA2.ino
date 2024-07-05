@@ -9,14 +9,16 @@ int buzzerPin = 8;
 int ultrasonicEcho = 7;
 int ultrasonicTrig = 6;
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-// SoftwareSerial Fingerprint(4, 5);  // RX, TX
-SoftwareSerial mySerial(4, 5);
+SoftwareSerial Fingerprint(4, 5);  // RX, TX
 SoftwareSerial ESP01(2, 3);        // RX, TX
 
-Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial,1337); 
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&Fingerprint, 1337);
 Servo myServo;
 int unauthorizedAttempts = 0;
 unsigned long timer = 0;
+int maxInvalidAttemps = 2;
+int freezeTime = 3000;
+int allowedOpenTime = 5000;
 
 void setup() {
   pinMode(servoPin, OUTPUT);
@@ -25,7 +27,6 @@ void setup() {
   pinMode(ultrasonicEcho, INPUT);
   Serial.begin(9600);
   finger.begin(57600);
-  ESP01.begin(9600);
 
   if (finger.verifyPassword()) {
     Serial.println("Found fingerprint sensor!");
@@ -33,6 +34,8 @@ void setup() {
     Serial.println("Did not find fingerprint sensor :(");
     while (1) { delay(1); }
   }
+
+  ESP01.begin(57600);
 
   lcd.init();
   lcd.clear();
@@ -42,24 +45,24 @@ void setup() {
 }
 
 void loop() {
-  // if (checkFingerprint()) {
-  // onFingerprintAuthorized();
-  // } else {
-  //   onFingerprintUnauthorized();
-  // }
+  while (true) {
+    int status = checkFingerprint();
 
-  // checkDoorStatus();
-
-
-  if (true) {
-    onFingerprintAuthorized();
-  } else {
-    onFingerprintUnauthorized();
+    if (status == 1) {
+      onFingerprintAuthorized();
+      break;
+    } else if (status == 2) {
+      onFingerprintUnauthorized();
+    } else if (status == 0) {
+      Serial.println("No finger detected");
+      delay(1000);  // Delay to avoid rapid looping
+    } else {
+      Serial.println("An error occurred");
+      delay(1000);  // Delay to avoid rapid looping
+    }
   }
 
   checkDoorStatus();
-  displayMessage("END");
-  delay(999999);
 }
 
 void initializeSystem() {
@@ -72,6 +75,7 @@ void initializeSystem() {
   delay(1000);
   lcd.print(".");
   delay(1000);
+  clearMessage();
 }
 
 void onFingerprintAuthorized() {
@@ -85,12 +89,14 @@ void onFingerprintAuthorized() {
 
 void onFingerprintUnauthorized() {
   unauthorizedAttempts++;
-  if (unauthorizedAttempts > 5) {
-    displayMessage("Try Again After 1 Min");
+  if (unauthorizedAttempts >= maxInvalidAttemps) {
+    displayMessage("Try Again After");
+    displayMessage2("1 Min");
     triggerAlertSound();
     sendDataToCloud("Too Many Attempts");
     unauthorizedAttempts = 0;
-    delay(60 * 1000);  // Freeze for 1 minute
+    delay(freezeTime);
+    clearMessage();
   } else {
     displayMessage("Access Denied");
     triggerAlertSound();
@@ -109,8 +115,8 @@ void unlockDoor() {
 void checkDoorStatus() {
   long distance = measureDistance();
 
-  while (distance >= 10) {              // Door is open
-    if (millis() - timer > 6 * 1000) {  // Check if 1 minute has passed
+  while (distance >= 10) {  // Door is open
+    if (millis() - timer > allowedOpenTime) {
       sendDataToCloud("Access Timeout");
       displayMessage("Access Timeout");
       displayMessage2("Pls Close Door");
@@ -119,6 +125,7 @@ void checkDoorStatus() {
       distance = measureDistance();  // Re-measure distance
       if (distance < 10) {           // Door is close
         lockDoor();
+        clearMessage();
         return;  // Exit the function
       }
     } else {
@@ -179,7 +186,51 @@ void displayMessage2(String message) {
   lcd.print(message);
 }
 
+void clearMessage(){
+    lcd.clear();
+}
 
 void sendDataToCloud(String data) {
   // ESP01.println(data);  // Send data to ESP-01 for cloud communication
+}
+
+int checkFingerprint() {
+  uint8_t result = getFingerprintID();
+  switch (result) {
+    case 0:
+      return 0;  // No finger detected
+    case 1:
+      return 1;  // Authorized finger detected
+    case 2:
+      return 2;  // Unauthorized finger detected
+    default:
+      return 3;  // An error occurred
+  }
+}
+
+uint8_t getFingerprintID() {
+  uint8_t p = finger.getImage();
+  if (p == FINGERPRINT_NOFINGER) {
+    return 0;  // No finger detected
+  } else if (p != FINGERPRINT_OK) {
+    return 3;  // Other error
+  }
+
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) {
+    return 3;  // Error converting image
+  }
+
+  p = finger.fingerSearch();
+  if (p == FINGERPRINT_OK) {
+    Serial.print("Found ID #");
+    Serial.print(finger.fingerID);
+    Serial.print(" with confidence of ");
+    Serial.println(finger.confidence);
+    return 1;  // Fingerprint found and authorized
+  } else if (p == FINGERPRINT_NOTFOUND) {
+    return 2;  // Fingerprint not found
+  } else {
+    return 3;  // Other error
+  }
 }
