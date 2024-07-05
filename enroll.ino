@@ -21,7 +21,7 @@
 
 SoftwareSerial mySerial(4, 5);
 
-Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial,1337);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
 
 uint8_t id;
 
