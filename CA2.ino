@@ -12,7 +12,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 SoftwareSerial Fingerprint(4, 5);  // RX, TX
 SoftwareSerial ESP01(2, 3);        // RX, TX
 
-Adafruit_Fingerprint finger = Adafruit_Fingerprint(&Fingerprint, 1337);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&Fingerprint);
 Servo myServo;
 int unauthorizedAttempts = 0;
 unsigned long timer = 0;
