@@ -195,6 +195,7 @@ void sendDataToCloud(String data) {
 }
 
 int checkFingerprint() {
+  finger.begin(57600);
   uint8_t result = getFingerprintID();
   switch (result) {
     case 0:
