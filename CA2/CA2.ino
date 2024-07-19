@@ -3,6 +3,7 @@
 #include <SoftwareSerial.h>
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_Fingerprint.h>
+#define DEBUG true
 
 int servoPin = 9;
 int buzzerPin = 8;
@@ -16,9 +17,11 @@ Adafruit_Fingerprint finger = Adafruit_Fingerprint(&Fingerprint);
 Servo myServo;
 int unauthorizedAttempts = 0;
 unsigned long timer = 0;
-int maxInvalidAttemps = 2;
+int maxInvalidAttemps = 1;
 int freezeTime = 3000;
 int allowedOpenTime = 5000;
+
+String apiKey = "82968VT3NE9NJMGY";
 
 void setup() {
   pinMode(servoPin, OUTPUT);
@@ -35,7 +38,17 @@ void setup() {
     while (1) { delay(1); }
   }
 
-  ESP01.begin(57600);
+  ESP01.begin(9600);
+  delay(1000); // Wait a bit for the ESP-01 to initialize
+  Serial.println("Starting...");
+  // Reset ESP-01 module
+  sendData("AT+RST\r\n", 5000, DEBUG);
+  // Set ESP-01 to station mode
+  sendData("AT+CWMODE=1\r\n", 2000, DEBUG);
+  // Connect to Wi-Fi network
+  sendData("AT+CWJAP=\"GoodBai\",\"bjtismylife\"\r\n", 10000, DEBUG);
+  // Set single connection mode
+  sendData("AT+CIPMUX=0\r\n", 2000, DEBUG);
 
   lcd.init();
   lcd.clear();
@@ -81,26 +94,26 @@ void initializeSystem() {
 void onFingerprintAuthorized() {
   unauthorizedAttempts = 0;
   displayMessage("Access Granted");
-  sendDataToCloud("1", "1");
   triggerSuccessSound();
   unlockDoor();
   timer = millis();  // Start timer
+  sendDataToCloud("field1", "1");
 }
 
 void onFingerprintUnauthorized() {
   unauthorizedAttempts++;
-  sendDataToCloud("1", "0");
   if (unauthorizedAttempts >= maxInvalidAttemps) {
     displayMessage("Try Again After");
     displayMessage2("1 Min");
     triggerAlertSound();
-    sendDataToCloud("3", "1");
+    sendDataToCloud("field1", "2");
     unauthorizedAttempts = 0;
     delay(freezeTime);
     clearMessage();
   } else {
     displayMessage("Access Denied");
     triggerAlertSound();
+  sendDataToCloud("field1", "0");
   }
 }
 
@@ -117,15 +130,16 @@ void checkDoorStatus() {
 
   while (distance >= 10) {  // Door is open
     if (millis() - timer > allowedOpenTime) {
-      sendDataToCloud("2", "1");
       displayMessage("Access Timeout");
       displayMessage2("Pls Close Door");
       triggerAlertSound();
+      sendDataToCloud("field2", "1");
 
       distance = measureDistance();  // Re-measure distance
       if (distance < 10) {           // Door is close
         lockDoor();
         clearMessage();
+        sendDataToCloud("field2", "0");
         return;  // Exit the function
       }
     } else {
@@ -191,8 +205,47 @@ void clearMessage() {
 }
 
 void sendDataToCloud(String field, String data) {
-  // ESP01.println(data);  // Send data to ESP-01 for cloud communication
+  ESP01.begin(9600);
+  String cmd = "AT+CIPSTART=\"TCP\",\"";
+  cmd += "184.106.153.149"; // Thingspeak.com's IP address
+  cmd += "\",80\r\n";
+  sendData(cmd, 5000, true);
+  String getStr ="";
+  getStr = "GET /update?api_key=";
+  getStr += apiKey;
+  getStr += "&" + field + "=";
+  getStr += data;
+  getStr += "\r\n";
+  ESP01.print("AT+CIPSEND=");
+  ESP01.println(getStr.length());
+  Serial.print("AT+CIPSEND=");
+  Serial.println(getStr.length());
+  delay(1000);
+  if (ESP01.find(">")) {
+    Serial.print(">");
+    sendData(getStr, 2000, true);
+  } else {
+    Serial.println("Failed to receive '>'");
+  }
+  sendData("AT+CIPCLOSE\r\n", 2000, true);
 }
+
+String sendData(String command, const int timeout, boolean debug) {
+  String response = "";
+  ESP01.print(command);
+  long int time = millis();
+  while ((time + timeout) > millis()) {
+    while (ESP01.available()) {
+      char c = ESP01.read();
+      response += c;
+    }
+  }
+  if (debug) {
+    Serial.print(response);
+  }
+  return response;
+}
+
 
 int checkFingerprint() {
   finger.begin(57600);
