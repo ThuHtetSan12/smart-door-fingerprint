@@ -81,7 +81,7 @@ void initializeSystem() {
 void onFingerprintAuthorized() {
   unauthorizedAttempts = 0;
   displayMessage("Access Granted");
-  sendDataToCloud("Access Granted");
+  sendDataToCloud("1", "1");
   triggerSuccessSound();
   unlockDoor();
   timer = millis();  // Start timer
@@ -89,18 +89,18 @@ void onFingerprintAuthorized() {
 
 void onFingerprintUnauthorized() {
   unauthorizedAttempts++;
+  sendDataToCloud("1", "0");
   if (unauthorizedAttempts >= maxInvalidAttemps) {
     displayMessage("Try Again After");
     displayMessage2("1 Min");
     triggerAlertSound();
-    sendDataToCloud("Too Many Attempts");
+    sendDataToCloud("3", "1");
     unauthorizedAttempts = 0;
     delay(freezeTime);
     clearMessage();
   } else {
     displayMessage("Access Denied");
     triggerAlertSound();
-    sendDataToCloud("Unauthorized Access");
   }
 }
 
@@ -117,7 +117,7 @@ void checkDoorStatus() {
 
   while (distance >= 10) {  // Door is open
     if (millis() - timer > allowedOpenTime) {
-      sendDataToCloud("Access Timeout");
+      sendDataToCloud("2", "1");
       displayMessage("Access Timeout");
       displayMessage2("Pls Close Door");
       triggerAlertSound();
@@ -186,11 +186,11 @@ void displayMessage2(String message) {
   lcd.print(message);
 }
 
-void clearMessage(){
-    lcd.clear();
+void clearMessage() {
+  lcd.clear();
 }
 
-void sendDataToCloud(String data) {
+void sendDataToCloud(String field, String data) {
   // ESP01.println(data);  // Send data to ESP-01 for cloud communication
 }
 
