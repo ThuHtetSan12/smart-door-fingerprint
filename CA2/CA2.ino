@@ -17,11 +17,12 @@ Adafruit_Fingerprint finger = Adafruit_Fingerprint(&Fingerprint);
 Servo myServo;
 int unauthorizedAttempts = 0;
 unsigned long timer = 0;
-int maxInvalidAttemps = 1;
+int maxInvalidAttemps = 2;
 int freezeTime = 3000;
 int allowedOpenTime = 5000;
 
-String apiKey = "82968VT3NE9NJMGY";
+String apiKey1 = "82968VT3NE9NJMGY";  //fingerprint stauts
+String apiKey2 = "7C0IPXV0SKCJLF1Y";  //door stauts
 
 void setup() {
   pinMode(servoPin, OUTPUT);
@@ -39,7 +40,7 @@ void setup() {
   }
 
   ESP01.begin(9600);
-  delay(1000); // Wait a bit for the ESP-01 to initialize
+  delay(1000);  // Wait a bit for the ESP-01 to initialize
   Serial.println("Starting...");
   // Reset ESP-01 module
   sendData("AT+RST\r\n", 5000, DEBUG);
@@ -97,7 +98,7 @@ void onFingerprintAuthorized() {
   triggerSuccessSound();
   unlockDoor();
   timer = millis();  // Start timer
-  sendDataToCloud("field1", "1");
+  sendDataToCloud("channel1", "1");
 }
 
 void onFingerprintUnauthorized() {
@@ -106,14 +107,14 @@ void onFingerprintUnauthorized() {
     displayMessage("Try Again After");
     displayMessage2("1 Min");
     triggerAlertSound();
-    sendDataToCloud("field1", "2");
+    sendDataToCloud("channel1", "2");
     unauthorizedAttempts = 0;
     delay(freezeTime);
     clearMessage();
   } else {
     displayMessage("Access Denied");
     triggerAlertSound();
-  sendDataToCloud("field1", "0");
+    sendDataToCloud("channel1", "0");
   }
 }
 
@@ -133,13 +134,13 @@ void checkDoorStatus() {
       displayMessage("Access Timeout");
       displayMessage2("Pls Close Door");
       triggerAlertSound();
-      sendDataToCloud("field2", "1");
+      sendDataToCloud("channel2", "1");
 
       distance = measureDistance();  // Re-measure distance
       if (distance < 10) {           // Door is close
         lockDoor();
         clearMessage();
-        sendDataToCloud("field2", "0");
+        sendDataToCloud("channel2", "0");
         return;  // Exit the function
       }
     } else {
@@ -204,16 +205,24 @@ void clearMessage() {
   lcd.clear();
 }
 
-void sendDataToCloud(String field, String data) {
+void sendDataToCloud(String channel, String data) {
   ESP01.begin(9600);
   String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += "184.106.153.149"; // Thingspeak.com's IP address
+  cmd += "184.106.153.149";  // Thingspeak.com's IP address
   cmd += "\",80\r\n";
   sendData(cmd, 5000, true);
-  String getStr ="";
+  String getStr = "";
   getStr = "GET /update?api_key=";
-  getStr += apiKey;
-  getStr += "&" + field + "=";
+  Serial.println("channel:"+channel);
+  if (channel == "channel1") {
+
+    getStr += apiKey1;
+    Serial.println("channel1");
+  } else if (channel == "channel2") {
+    Serial.println("channel2");
+    getStr += apiKey2;
+  }
+  getStr += "&field1=";
   getStr += data;
   getStr += "\r\n";
   ESP01.print("AT+CIPSEND=");
