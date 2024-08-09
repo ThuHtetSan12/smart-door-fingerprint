@@ -3,6 +3,7 @@
 #include <SoftwareSerial.h>
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_Fingerprint.h>
+
 #define DEBUG true
 
 int servoPin = 9;
@@ -15,106 +16,118 @@ SoftwareSerial ESP01(2, 3);        // RX, TX
 
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&Fingerprint);
 Servo myServo;
+
 int unauthorizedAttempts = 0;
 unsigned long timer = 0;
-int maxInvalidAttemps = 2;
-int freezeTime = 3000;
-int allowedOpenTime = 5000;
+int maxInvalidAttemps = 5;
+int freezeTime = 60 * 1000;  // 3 Seconds
+int allowedOpenTime = 5 * 1000; // 5 Seconds
 
-String apiKey1 = "82968VT3NE9NJMGY";  //fingerprint stauts
-String apiKey2 = "7C0IPXV0SKCJLF1Y";  //door stauts
+String apiKey1 = "82968VT3NE9NJMGY";  //Channel 1: Fingerprint Stauts
+String apiKey2 = "7C0IPXV0SKCJLF1Y";  //Channel 2: Door Stauts
 
 void setup() {
+  initializeSystem();
+
   pinMode(servoPin, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
   pinMode(ultrasonicTrig, OUTPUT);
   pinMode(ultrasonicEcho, INPUT);
+
   Serial.begin(9600);
-  finger.begin(57600);
-
-  if (finger.verifyPassword()) {
-    Serial.println("Found fingerprint sensor!");
-  } else {
-    Serial.println("Did not find fingerprint sensor :(");
-    while (1) { delay(1); }
-  }
-
   ESP01.begin(9600);
-  delay(1000);  // Wait a bit for the ESP-01 to initialize
-  Serial.println("Starting...");
-  // Reset ESP-01 module
-  sendData("AT+RST\r\n", 5000, DEBUG);
-  // Set ESP-01 to station mode
-  sendData("AT+CWMODE=1\r\n", 2000, DEBUG);
-  // Connect to Wi-Fi network
-  sendData("AT+CWJAP=\"GoodBai\",\"bjtismylife\"\r\n", 10000, DEBUG);
-  // Set single connection mode
-  sendData("AT+CIPMUX=0\r\n", 2000, DEBUG);
+  Fingerprint.begin(57600);
 
-  lcd.init();
+  delay(1000);  // Wait a bit for Software Serial to initialize
+
+  initializeESP01();
+
   lcd.clear();
-  lcd.backlight();
-
-  initializeSystem();
 }
 
 void loop() {
-  while (true) {
-    int status = checkFingerprint();
+  // Part 1: System Logic
+  int status = checkFingerprint();
 
-    if (status == 1) {
-      onFingerprintAuthorized();
-      break;
-    } else if (status == 2) {
-      onFingerprintUnauthorized();
-    } else if (status == 0) {
-      Serial.println("No finger detected");
-      delay(1000);  // Delay to avoid rapid looping
-    } else {
-      Serial.println("An error occurred");
-      delay(1000);  // Delay to avoid rapid looping
-    }
+  if (status == 0) {
+    displayMessageLine1("Hello, Welcome!");
+    Serial.println("No finger detected");
+    delay(1000);  // Delay to avoid rapid looping
+  } else if (status == 1) {
+    onFingerprintAuthorized();
+    checkDoorStatus();
+  } else if (status == 2) {
+    onFingerprintUnauthorized();
+  } else {
+    Serial.println("An error occurred");
+    delay(1000);  // Delay to avoid rapid looping
   }
 
-  checkDoorStatus();
+  // Part 2: HTTP Server
+  timer = millis();
+  while (millis() - timer < 2000) {  // Allow 2 seconds for checking HTTP requests
+    checkHTTPRequests();
+  }
 }
 
 void initializeSystem() {
-  unauthorizedAttempts = 0;
+  lcd.init();
   lcd.clear();
+  lcd.backlight();
   lcd.setCursor(0, 0);
-  lcd.print("System Init.");
+  lcd.print("Init System.");
   delay(1000);
   lcd.print(".");
   delay(1000);
   lcd.print(".");
   delay(1000);
-  clearMessage();
+}
+
+void initializeESP01() {
+  // Reset ESP-01 module
+  sendData("AT+RST\r\n", 5000, DEBUG);
+
+  // Set ESP-01 to station mode
+  sendData("AT+CWMODE=1\r\n", 2000, DEBUG);
+
+  // Connect to Wi-Fi network
+  sendData("AT+CWJAP=\"Galaxy S24+ 5G\",\"jasper666\"\r\n", 10000, true);
+  // sendData("AT+CWJAP=\"John@Tan\",\"07@5562402\"\r\n", 10000, true);
+  // sendData("AT+CWJAP=\"eee-iot\",\"I0t@eee2024!\"\r\n", 10000, true);
+  // sendData("AT+CWJAP=\"GoodBai\",\"bjtismylife\"\r\n", 10000, DEBUG);
+
+  // Enable multiple connections
+  sendData("AT+CIPMUX=1\r\n", 2000, true); //server
+  // sendData("AT+CIPMUX=0\r\n", 2000, true); //thinkspeak
+
+  // Start server on port 80
+  sendData("AT+CIPSERVER=1,80\r\n", 2000, true);
+
+  getIPAddress();
 }
 
 void onFingerprintAuthorized() {
   unauthorizedAttempts = 0;
-  displayMessage("Access Granted");
-  triggerSuccessSound();
+  displayMessageLine1("Access Granted");
   unlockDoor();
   timer = millis();  // Start timer
-  sendDataToCloud("channel1", "1");
+  sendDataToCloud("channel1", "0");
 }
 
 void onFingerprintUnauthorized() {
   unauthorizedAttempts++;
   if (unauthorizedAttempts >= maxInvalidAttemps) {
-    displayMessage("Try Again After");
-    displayMessage2("1 Min");
+    displayMessageLine1("Try Again After");
+    displayMessageLine2("1 Min");
     triggerAlertSound();
     sendDataToCloud("channel1", "2");
     unauthorizedAttempts = 0;
     delay(freezeTime);
-    clearMessage();
+    lcd.clear();
   } else {
-    displayMessage("Access Denied");
+    displayMessageLine1("Access Denied");
     triggerAlertSound();
-    sendDataToCloud("channel1", "0");
+    sendDataToCloud("channel1", "1");
   }
 }
 
@@ -123,23 +136,23 @@ void lockDoor() {
 }
 
 void unlockDoor() {
+  triggerSuccessSound();
   setServoAngle(90);
 }
 
 void checkDoorStatus() {
   long distance = measureDistance();
-
   while (distance >= 10) {  // Door is open
     if (millis() - timer > allowedOpenTime) {
-      displayMessage("Access Timeout");
-      displayMessage2("Pls Close Door");
+      displayMessageLine1("Access Timeout");
+      displayMessageLine2("Pls Close Door");
       triggerAlertSound();
       sendDataToCloud("channel2", "1");
 
       distance = measureDistance();  // Re-measure distance
-      if (distance < 10) {           // Door is close
+      if (distance < 10) {           // Door is closed
         lockDoor();
-        clearMessage();
+        lcd.clear();
         sendDataToCloud("channel2", "0");
         return;  // Exit the function
       }
@@ -147,6 +160,7 @@ void checkDoorStatus() {
       delay(5000);  // Wait for 5 seconds before checking again
     }
   }
+
   // If the door is found to be closed
   lockDoor();
 }
@@ -174,72 +188,67 @@ void setServoAngle(int angle) {
   myServo.detach();
 }
 
-void activateBuzzer(int frequency, int duration) {
-  tone(buzzerPin, frequency, duration);
-  delay(duration);    // Wait for the tone to finish
-  noTone(buzzerPin);  // Stop the tone
-}
-
 void triggerSuccessSound() {
-  activateBuzzer(1000, 500);
+  tone(buzzerPin, 1000, 500);  //pin, frequency, duration
+  delay(500);                  // Wait for the tone to finish
+  noTone(buzzerPin);           // Stop the tone
 }
 
 void triggerAlertSound() {
-  activateBuzzer(2000, 2000);
+  tone(buzzerPin, 2000, 2000);  //pin, frequency, duration
+  delay(2000);                  // Wait for the tone to finish
+  noTone(buzzerPin);            // Stop the tone
 }
 
-void displayMessage(String message) {
+void displayMessageLine1(String message) {
   Serial.println(message);
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(message);
 }
 
-void displayMessage2(String message) {
+void displayMessageLine2(String message) {
   Serial.println(message);
   lcd.setCursor(0, 1);
   lcd.print(message);
 }
 
-void clearMessage() {
-  lcd.clear();
-}
-
 void sendDataToCloud(String channel, String data) {
-  ESP01.begin(9600);
-  String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += "184.106.153.149";  // Thingspeak.com's IP address
-  cmd += "\",80\r\n";
-  sendData(cmd, 5000, true);
-  String getStr = "";
-  getStr = "GET /update?api_key=";
-  Serial.println("channel:"+channel);
-  if (channel == "channel1") {
+  // String cmd = "AT+CIPSTART=\"TCP\",\"";
+  // cmd += "184.106.153.149";  // Thingspeak.com's IP address
+  // cmd += "\",80\r\n";
+  // sendData(cmd, 5000, true);
 
-    getStr += apiKey1;
-    Serial.println("channel1");
-  } else if (channel == "channel2") {
-    Serial.println("channel2");
-    getStr += apiKey2;
-  }
-  getStr += "&field1=";
-  getStr += data;
-  getStr += "\r\n";
-  ESP01.print("AT+CIPSEND=");
-  ESP01.println(getStr.length());
-  Serial.print("AT+CIPSEND=");
-  Serial.println(getStr.length());
-  delay(1000);
-  if (ESP01.find(">")) {
-    Serial.print(">");
-    sendData(getStr, 2000, true);
-  } else {
-    Serial.println("Failed to receive '>'");
-  }
-  sendData("AT+CIPCLOSE\r\n", 2000, true);
+  // String getStr = "";
+  // getStr = "GET /update?api_key=";
+  // Serial.println("channel:" + channel);
+  // if (channel == "channel1") {
+
+  //   getStr += apiKey1;
+  //   Serial.println("channel1");
+  // } else if (channel == "channel2") {
+  //   Serial.println("channel2");
+  //   getStr += apiKey2;
+  // }
+  // getStr += "&field1=";
+  // getStr += data;
+  // getStr += "\r\n";
+  // ESP01.print("AT+CIPSEND=");
+  // ESP01.println(getStr.length());
+  // Serial.print("AT+CIPSEND=");
+  // Serial.println(getStr.length());
+  // delay(1000);
+  // if (ESP01.find(">")) {
+  //   Serial.print(">");
+  //   sendData(getStr, 2000, true);
+  // } else {
+  //   Serial.println("Failed to receive '>'");
+  // }
+  // sendData("AT+CIPCLOSE\r\n", 2000, true);
 }
 
 String sendData(String command, const int timeout, boolean debug) {
+  ESP01.listen();
   String response = "";
   ESP01.print(command);
   long int time = millis();
@@ -255,9 +264,8 @@ String sendData(String command, const int timeout, boolean debug) {
   return response;
 }
 
-
 int checkFingerprint() {
-  finger.begin(57600);
+  Fingerprint.listen();
   uint8_t result = getFingerprintID();
   switch (result) {
     case 0:
@@ -295,5 +303,29 @@ uint8_t getFingerprintID() {
     return 2;  // Fingerprint not found
   } else {
     return 3;  // Other error
+  }
+}
+
+void getIPAddress() {
+  String response = sendData("AT+CIFSR\r\n", 2000, true);
+  int ipStart = response.indexOf("STAIP,\"") + 7;
+  int ipEnd = response.indexOf("\"", ipStart);
+
+  String ipAddress = response.substring(ipStart, ipEnd);
+  Serial.print("ESP-01 IP Address: ");
+  Serial.println(ipAddress);
+}
+
+void checkHTTPRequests() {
+  ESP01.listen();
+  if (ESP01.available()) {
+    String request = ESP01.readStringUntil('\n');
+
+    // Check if the request contains "unlockDoor"
+    // http://IP_ADDRESS/msg=unlockDoor
+    if (request.indexOf("GET /msg=unlockDoor") != -1) {
+      onFingerprintAuthorized();
+      checkDoorStatus();
+    }
   }
 }
