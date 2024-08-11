@@ -20,8 +20,8 @@ Servo myServo;
 int unauthorizedAttempts = 0;
 unsigned long timer = 0;
 int maxInvalidAttemps = 5;
-int freezeTime = 60 * 1000;  // 3 Seconds
-int allowedOpenTime = 5 * 1000; // 5 Seconds
+int freezeTime = 30 * 1000;  // 30 Seconds
+int allowedOpenTime = 30 * 1000; // 30 Seconds
 
 String apiKey1 = "82968VT3NE9NJMGY";  //Channel 1: Fingerprint Stauts
 String apiKey2 = "7C0IPXV0SKCJLF1Y";  //Channel 2: Door Stauts
@@ -91,14 +91,14 @@ void initializeESP01() {
   sendData("AT+CWMODE=1\r\n", 2000, DEBUG);
 
   // Connect to Wi-Fi network
-  sendData("AT+CWJAP=\"Galaxy S24+ 5G\",\"jasper666\"\r\n", 10000, true);
+  // sendData("AT+CWJAP=\"Galaxy S24+ 5G\",\"jasper666\"\r\n", 10000, true);
   // sendData("AT+CWJAP=\"John@Tan\",\"07@5562402\"\r\n", 10000, true);
   // sendData("AT+CWJAP=\"eee-iot\",\"I0t@eee2024!\"\r\n", 10000, true);
-  // sendData("AT+CWJAP=\"GoodBai\",\"bjtismylife\"\r\n", 10000, DEBUG);
+  sendData("AT+CWJAP=\"wifi_username\",\"user_password\"\r\n", 10000, DEBUG);
 
   // Enable multiple connections
-  sendData("AT+CIPMUX=1\r\n", 2000, true); //server
-  // sendData("AT+CIPMUX=0\r\n", 2000, true); //thinkspeak
+  // sendData("AT+CIPMUX=1\r\n", 2000, true); //server
+  sendData("AT+CIPMUX=0\r\n", 2000, true); //thinkspeak
 
   // Start server on port 80
   sendData("AT+CIPSERVER=1,80\r\n", 2000, true);
@@ -141,13 +141,14 @@ void unlockDoor() {
 }
 
 void checkDoorStatus() {
-  long distance = measureDistance();
+  long distance = measureDistance(); 
   while (distance >= 10) {  // Door is open
+  sendDataToCloud("channel2", "1");
     if (millis() - timer > allowedOpenTime) {
       displayMessageLine1("Access Timeout");
       displayMessageLine2("Pls Close Door");
       triggerAlertSound();
-      sendDataToCloud("channel2", "1");
+      //sendDataToCloud("channel2", "1");
 
       distance = measureDistance();  // Re-measure distance
       if (distance < 10) {           // Door is closed
@@ -158,11 +159,14 @@ void checkDoorStatus() {
       }
     } else {
       delay(5000);  // Wait for 5 seconds before checking again
+      distance = measureDistance();
     }
   }
 
   // If the door is found to be closed
   lockDoor();
+  lcd.clear();
+  sendDataToCloud("channel2", "0");
 }
 
 long measureDistance() {
@@ -214,37 +218,37 @@ void displayMessageLine2(String message) {
 }
 
 void sendDataToCloud(String channel, String data) {
-  // String cmd = "AT+CIPSTART=\"TCP\",\"";
-  // cmd += "184.106.153.149";  // Thingspeak.com's IP address
-  // cmd += "\",80\r\n";
-  // sendData(cmd, 5000, true);
+  String cmd = "AT+CIPSTART=\"TCP\",\"";
+  cmd += "184.106.153.149";  // Thingspeak.com's IP address
+  cmd += "\",80\r\n";
+  sendData(cmd, 5000, true);
 
-  // String getStr = "";
-  // getStr = "GET /update?api_key=";
-  // Serial.println("channel:" + channel);
-  // if (channel == "channel1") {
+  String getStr = "";
+  getStr = "GET /update?api_key=";
+  Serial.println("channel:" + channel);
+  if (channel == "channel1") {
 
-  //   getStr += apiKey1;
-  //   Serial.println("channel1");
-  // } else if (channel == "channel2") {
-  //   Serial.println("channel2");
-  //   getStr += apiKey2;
-  // }
-  // getStr += "&field1=";
-  // getStr += data;
-  // getStr += "\r\n";
-  // ESP01.print("AT+CIPSEND=");
-  // ESP01.println(getStr.length());
-  // Serial.print("AT+CIPSEND=");
-  // Serial.println(getStr.length());
-  // delay(1000);
-  // if (ESP01.find(">")) {
-  //   Serial.print(">");
-  //   sendData(getStr, 2000, true);
-  // } else {
-  //   Serial.println("Failed to receive '>'");
-  // }
-  // sendData("AT+CIPCLOSE\r\n", 2000, true);
+    getStr += apiKey1;
+    Serial.println("channel1");
+  } else if (channel == "channel2") {
+    Serial.println("channel2");
+    getStr += apiKey2;
+  }
+  getStr += "&field1=";
+  getStr += data;
+  getStr += "\r\n";
+  ESP01.print("AT+CIPSEND=");
+  ESP01.println(getStr.length());
+  Serial.print("AT+CIPSEND=");
+  Serial.println(getStr.length());
+  delay(1000);
+  if (ESP01.find(">")) {
+    Serial.print(">");
+    sendData(getStr, 2000, true);
+  } else {
+    Serial.println("Failed to receive '>'");
+  }
+  sendData("AT+CIPCLOSE\r\n", 2000, true);
 }
 
 String sendData(String command, const int timeout, boolean debug) {
